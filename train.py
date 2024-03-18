@@ -16,35 +16,28 @@ def main():
     train_dataset = create_dataset(train_path, train_label_path)
     test_dataset = create_dataset(test_path, test_label_path)
 
-    sample = np.array(train_dataset[0]['label'])
-    print(sample.shape)
-
-
-
-    dataset = DatasetDict({
-        "train": train_dataset,
-        "test": test_dataset
-    })
-
-    id2label = {0: 'background', 1: 'target'}
-    label2id = {'background':0, 'target': 1}
+    id2label = {0: 'background', 255: 'target'}
+    label2id = {'background':0, 'target': 255}
     num_labels = len(id2label)
 
     checkpoint = "nvidia/mit-b0"
-    image_processor = AutoImageProcessor.from_pretrained(checkpoint, reduce_labels=True)
+    image_processor = AutoImageProcessor.from_pretrained(checkpoint, reduce_labels=False)
 
     jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
     def transforms(example_batch):
-        print(example_batch)
-        images = [x.convert("RGB") for x in example_batch["image"]]
-        labels = [x for x in example_batch["label"]]
+        images = [jitter(x.convert("RGB")) for x in example_batch["image"]]
+        labels = [x for x in example_batch["annotation"]]
         inputs = image_processor(images, labels)
         return inputs
 
+    def val_transforms(example_batch):
+        images = [jitter(x.convert("RGB")) for x in example_batch["image"]]
+        labels = [x for x in example_batch["annotation"]]
+        inputs = image_processor(images, labels)
+        return inputs
+    
     train_dataset.set_transform(transforms)
-    test_dataset.set_transform(transforms)
-
-    print(train_dataset[0])
+    test_dataset.set_transform(val_transforms)
 
     print("done tranformation")
 
@@ -75,18 +68,10 @@ def main():
                     metrics[key] = value.tolist()
             return metrics
 
-    # from datasets import load_dataset
-
-    # ds = load_dataset("scene_parse_150", split="train[:50]")
-
-    # ds = ds.train_test_split(test_size=0.2)
-    # train_ds = ds["train"]
-    # test_ds = ds["test"]
-
     model = AutoModelForSemanticSegmentation.from_pretrained(checkpoint, id2label=id2label, label2id=label2id)
 
     training_args = TrainingArguments(
-        output_dir="Electron-Microscopy-seg",
+        output_dir=os.path.join("data", "Electron-Microscopy-seg"),
         learning_rate=6e-5,
         num_train_epochs=50,
         per_device_train_batch_size=2,
@@ -96,7 +81,7 @@ def main():
         save_strategy="steps",
         save_steps=20,
         eval_steps=20,
-        logging_steps=1,
+        logging_steps=10,
         eval_accumulation_steps=5,
         remove_unused_columns=False,
     )
@@ -110,13 +95,7 @@ def main():
         compute_metrics=compute_metrics,
     )
 
-    data_loader = trainer.get_train_dataloader()
-
-    for data in enumerate(data_loader):
-        print(data)
-        break
-
-    # trainer.train()
+    trainer.train()
 
 if __name__ == "__main__":
     main()
